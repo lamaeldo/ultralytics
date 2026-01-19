@@ -1995,6 +1995,7 @@ class Format:
         mask_overlap: bool = True,
         batch_idx: bool = True,
         bgr: float = 0.0,
+        binarize: bool = False,
     ):
         """Initialize the Format class with given parameters for image and instance annotation formatting.
 
@@ -2011,6 +2012,7 @@ class Format:
             mask_overlap (bool): If True, allows mask overlap.
             batch_idx (bool): If True, keeps batch indexes.
             bgr (float): Probability of returning BGR images instead of RGB.
+            binarize (bool): If True, clamp images to two colors (0 and 255) before tensor conversion.
         """
         self.bbox_format = bbox_format
         self.normalize = normalize
@@ -2021,6 +2023,7 @@ class Format:
         self.mask_overlap = mask_overlap
         self.batch_idx = batch_idx  # keep the batch indexes
         self.bgr = bgr
+        self.binarize = binarize
 
     def __call__(self, labels: dict[str, Any]) -> dict[str, Any]:
         """Format image annotations for object detection, instance segmentation, and pose estimation tasks.
@@ -2120,12 +2123,29 @@ class Format:
             >>> print(formatted_img.shape)
             torch.Size([3, 100, 100])
         """
+        if self.binarize:
+            img = self._binarize_img(img)
         if len(img.shape) < 3:
             img = img[..., None]
         img = img.transpose(2, 0, 1)
         img = np.ascontiguousarray(img[::-1] if random.uniform(0, 1) > self.bgr and img.shape[0] == 3 else img)
         img = torch.from_numpy(img)
         return img
+
+    def _binarize_img(self, img: np.ndarray) -> np.ndarray:
+        """Convert an image to strict binary values (0 or 255)."""
+        if img.size == 0:
+            return img
+        max_val = float(img.max())
+        thresh = 0.5 if max_val <= 1.0 else 127.5
+        if img.ndim == 3:
+            gray = img.mean(axis=2)
+            mask_u8 = (gray > thresh).astype(np.uint8) * 255
+            mask_u8 = mask_u8[..., None]
+            if img.shape[2] > 1:
+                mask_u8 = np.repeat(mask_u8, img.shape[2], axis=2)
+            return mask_u8
+        return (img > thresh).astype(np.uint8) * 255
 
     def _format_segments(
         self, instances: Instances, cls: np.ndarray, w: int, h: int
@@ -2406,6 +2426,9 @@ def v8_transforms(dataset, imgsz: int, hyp: IterableSimpleNamespace, stretch: bo
         >>> hyp.augmentations = augmentations
         >>> transforms = v8_transforms(dataset, imgsz=640, hyp=hyp)
     """
+    binarize = getattr(hyp, "binarize", False)
+    interpolation = cv2.INTER_NEAREST if binarize else cv2.INTER_LINEAR
+    padding_value = 0 if binarize else 114
     mosaic = Mosaic(dataset, imgsz=imgsz, p=hyp.mosaic)
     affine = RandomPerspective(
         degrees=hyp.degrees,
@@ -2413,7 +2436,9 @@ def v8_transforms(dataset, imgsz: int, hyp: IterableSimpleNamespace, stretch: bo
         scale=hyp.scale,
         shear=hyp.shear,
         perspective=hyp.perspective,
-        pre_transform=None if stretch else LetterBox(new_shape=(imgsz, imgsz)),
+        pre_transform=None
+        if stretch
+        else LetterBox(new_shape=(imgsz, imgsz), interpolation=interpolation, padding_value=padding_value),
     )
 
     pre_transform = Compose([mosaic, affine])

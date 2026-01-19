@@ -117,6 +117,7 @@ perspective: 0.0 # (float) perspective fraction (0–0.001 typical)
 flipud: 0.0 # (float) vertical flip probability
 fliplr: 0.5 # (float) horizontal flip probability
 bgr: 0.0 # (float) RGB↔BGR channel swap probability
+binarize: False # (bool) enforce binary (2-color) images after augmentation
 mosaic: 1.0 # (float) mosaic augmentation probability
 mixup: 0.0 # (float) MixUp augmentation probability
 cutmix: 0.0 # (float) CutMix augmentation probability

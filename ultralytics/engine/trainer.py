@@ -425,6 +425,22 @@ class BaseTrainer:
                 # Forward
                 with autocast(self.amp):
                     batch = self.preprocess_batch(batch)
+                    # DEBUG: print number of unique colours (first batch only)
+                    if not hasattr(self, "_printed_ncolors"):
+                        import torch
+
+                        im = batch["img"][0]  # (C,H,W), float in [0,1] typically
+                        im_u8 = (im * 255).round().clamp(0, 255).to(torch.uint8)
+
+                        if im_u8.shape[0] == 1:
+                            ncolors = torch.unique(im_u8).numel()
+                        else:
+                            # count unique RGB triplets
+                            pixels = im_u8.permute(1, 2, 0).reshape(-1, im_u8.shape[0])
+                            ncolors = torch.unique(pixels, dim=0).shape[0]
+
+                        print(f"[DEBUG] unique colours in train image (post-preprocess): {ncolors}")
+                        self._printed_ncolors = True
                     if self.args.compile:
                         # Decouple inference and loss calculations for improved compile performance
                         preds = self.model(batch["img"])

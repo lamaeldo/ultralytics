@@ -212,13 +212,33 @@ class YOLODataset(BaseDataset):
         Returns:
             (Compose): Composed transforms.
         """
+        binarize = getattr(hyp, "binarize", False)
         if self.augment:
             hyp.mosaic = hyp.mosaic if self.augment and not self.rect else 0.0
             hyp.mixup = hyp.mixup if self.augment and not self.rect else 0.0
             hyp.cutmix = hyp.cutmix if self.augment and not self.rect else 0.0
+            if binarize:
+                # Disable color/intensity augmentations that introduce grayscale values for binary images.
+                hyp.hsv_h = 0.0
+                hyp.hsv_s = 0.0
+                hyp.hsv_v = 0.0
+                hyp.mixup = 0.0
+                hyp.cutmix = 0.0
+                hyp.augmentations = []
             transforms = v8_transforms(self, self.imgsz, hyp)
         else:
-            transforms = Compose([LetterBox(new_shape=(self.imgsz, self.imgsz), scaleup=False)])
+            interpolation = cv2.INTER_NEAREST if binarize else cv2.INTER_LINEAR
+            padding_value = 0 if binarize else 114
+            transforms = Compose(
+                [
+                    LetterBox(
+                        new_shape=(self.imgsz, self.imgsz),
+                        scaleup=False,
+                        interpolation=interpolation,
+                        padding_value=padding_value,
+                    )
+                ]
+            )
         transforms.append(
             Format(
                 bbox_format="xywh",
@@ -230,6 +250,7 @@ class YOLODataset(BaseDataset):
                 mask_ratio=hyp.mask_ratio,
                 mask_overlap=hyp.overlap_mask,
                 bgr=hyp.bgr if self.augment else 0.0,  # only affect training.
+                binarize=binarize,
             )
         )
         return transforms

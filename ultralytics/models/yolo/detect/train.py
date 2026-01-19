@@ -130,8 +130,13 @@ class DetectionTrainer(BaseTrainer):
                 ns = [
                     math.ceil(x * sf / self.stride) * self.stride for x in imgs.shape[2:]
                 ]  # new shape (stretched to gs-multiple)
-                imgs = nn.functional.interpolate(imgs, size=ns, mode="bilinear", align_corners=False)
+                if getattr(self.args, "binarize", False):
+                    imgs = nn.functional.interpolate(imgs, size=ns, mode="nearest")
+                else:
+                    imgs = nn.functional.interpolate(imgs, size=ns, mode="bilinear", align_corners=False)
             batch["img"] = imgs
+        if getattr(self.args, "binarize", False):
+            batch["img"] = (batch["img"] > 0.5).float()
         return batch
 
     def set_model_attributes(self):

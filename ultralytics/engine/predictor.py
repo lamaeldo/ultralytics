@@ -160,6 +160,15 @@ class BasePredictor:
         not_tensor = not isinstance(im, torch.Tensor)
         if not_tensor:
             im = np.stack(self.pre_transform(im))
+            if not hasattr(self, "_printed_ncolors"):
+                im0 = im[0]
+                if im0.ndim == 3:
+                    pixels = im0.reshape(-1, im0.shape[2])
+                    ncolors = np.unique(pixels, axis=0).shape[0]
+                else:
+                    ncolors = np.unique(im0).size
+                LOGGER.info(f"[DEBUG] unique colors in predict image (post-preprocess): {ncolors}")
+                self._printed_ncolors = True
             if im.shape[-1] == 3:
                 im = im[..., ::-1]  # BGR to RGB
             im = im.transpose((0, 3, 1, 2))  # BHWC to BCHW, (n, 3, h, w)
@@ -191,14 +200,37 @@ class BasePredictor:
             (list[np.ndarray]): List of transformed images.
         """
         same_shapes = len({x.shape for x in im}) == 1
+        binarize = getattr(self.args, "binarize", False)
+        interpolation = cv2.INTER_NEAREST if binarize else cv2.INTER_LINEAR
+        padding_value = 0 if binarize else 114
         letterbox = LetterBox(
             self.imgsz,
             auto=same_shapes
             and self.args.rect
             and (self.model.pt or (getattr(self.model, "dynamic", False) and not self.model.imx)),
             stride=self.model.stride,
+            interpolation=interpolation,
+            padding_value=padding_value,
         )
+        if binarize:
+            return [self._binarize_img(letterbox(image=x)) for x in im]
         return [letterbox(image=x) for x in im]
+
+    @staticmethod
+    def _binarize_img(img: np.ndarray) -> np.ndarray:
+        """Convert an image to strict binary values (0 or 255)."""
+        if img.size == 0:
+            return img
+        max_val = float(img.max())
+        thresh = 0.5 if max_val <= 1.0 else 127.5
+        if img.ndim == 3:
+            gray = img.mean(axis=2)
+            mask_u8 = (gray > thresh).astype(np.uint8) * 255
+            mask_u8 = mask_u8[..., None]
+            if img.shape[2] > 1:
+                mask_u8 = np.repeat(mask_u8, img.shape[2], axis=2)
+            return mask_u8
+        return (img > thresh).astype(np.uint8) * 255
 
     def postprocess(self, preds, img, orig_imgs):
         """Post-process predictions for an image and return them."""
